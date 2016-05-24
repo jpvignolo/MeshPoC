@@ -55,6 +55,7 @@ public class MainActivity extends AppCompatActivity implements ConnectCallback {
                 MY_PERMISSIONS_REQUEST_ACCESS_COARSE_LOCATION);
 
         mDeviceList = new ArrayList<>();
+        mSocketHash = new HashMap<>();
         mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
         mBluetoothAdapter.startDiscovery();
         mReceiver = new BroadcastReceiver() {
@@ -88,9 +89,14 @@ public class MainActivity extends AppCompatActivity implements ConnectCallback {
                 }
                 if (BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(action))
                 {
-                    for (BluetoothDevice device : mDeviceList) {
-                        ConnectThread ct = new ConnectThread(device);
-                        ct.run();
+                    Log.d("bluetooth","End Scan");
+                    if (mDeviceList.size() >0 )
+                        for (BluetoothDevice device : mDeviceList) {
+                            ConnectThread ct = new ConnectThread(device);
+                            ct.run();
+                        }
+                    else {
+                        switchToServerMode();
                     }
                 }
             }
@@ -105,6 +111,7 @@ public class MainActivity extends AppCompatActivity implements ConnectCallback {
     }
 
     private void switchToServerMode() {
+        Log.d("bluetooth","Switching to server mode");
         clientMode = false;
         Thread listen = new AcceptThread();
         listen.start();
@@ -132,6 +139,9 @@ public class MainActivity extends AppCompatActivity implements ConnectCallback {
             Map.Entry pair = (Map.Entry)it.next();
             it.remove(); // avoids a ConcurrentModificationException
             BluetoothSocket socket = (BluetoothSocket)pair.getValue();
+            ConnectedThread ct = new ConnectedThread(socket);
+            ct.run();
+            ct.write(s.getBytes());
         }
     }
 
@@ -214,6 +224,8 @@ public class MainActivity extends AppCompatActivity implements ConnectCallback {
                     Log.d("bluetooth", "Server connected!");
                     try {
                         mmServerSocket.close();
+                        ConnectedThread ct = new ConnectedThread(socket);
+                        ct.run();
                     } catch (IOException e) {
                         break;
                     }
@@ -237,7 +249,7 @@ public class MainActivity extends AppCompatActivity implements ConnectCallback {
         private final InputStream mmInStream;
         private final OutputStream mmOutStream;
         BluetoothSocket mmSocket;
-        public ConnectedThread(BluetoothSocket socket, String msg) {
+        public ConnectedThread(BluetoothSocket socket) {
 
             mmSocket = socket;
             InputStream tmpIn = null;
