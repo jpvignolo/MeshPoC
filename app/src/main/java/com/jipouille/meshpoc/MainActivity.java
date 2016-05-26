@@ -3,7 +3,6 @@ package com.jipouille.meshpoc;
 import android.Manifest;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
-import android.bluetooth.BluetoothServerSocket;
 import android.bluetooth.BluetoothSocket;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -13,6 +12,7 @@ import android.os.Handler;
 import android.os.Message;
 import android.os.Parcelable;
 import android.support.v4.app.ActivityCompat;
+import android.util.Pair;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
@@ -21,25 +21,26 @@ import android.widget.ArrayAdapter;
 import com.jipouille.meshpoc.bluetoothmanager.AcceptThread;
 import com.jipouille.meshpoc.bluetoothmanager.ConnectThread;
 import com.jipouille.meshpoc.bluetoothmanager.ConnectedThread;
-import com.jipouille.meshpoc.callbacks.ConnectCallback;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.UUID;
 
-public class MainActivity extends AppCompatActivity implements ConnectCallback {
+public class MainActivity extends AppCompatActivity {
 
     public static final int MESSAGE_READ = 1;
     public static final int MESSAGE_WRITE = 2;
+    public static final int MESSAGE_CLIENT_CONNECTED = 3;
+    public static final int MESSAGE_CONNECTED_TO_SERVER = 4;
+    public static final int MESSAGE_CONNECTION_TO_SERVER_FAIL = 5;
+
     private BluetoothAdapter mBluetoothAdapter;
     private BroadcastReceiver mReceiver;
-    private ArrayList<BluetoothDevice> mDeviceList;
-    private HashMap<BluetoothDevice, BluetoothSocket> mSocketHash;
+    private ArrayList<BluetoothDevice> mServerDeviceList;
+    private HashMap<BluetoothDevice, BluetoothSocket> mClientSocketHash;
+    private HashMap<BluetoothDevice, BluetoothSocket> mServerSocketHash;
     private ArrayAdapter<String> mArrayAdapter;
     private boolean clientMode = true;
     private int connectedDevices = 0;
@@ -57,8 +58,9 @@ public class MainActivity extends AppCompatActivity implements ConnectCallback {
                 new String[]{Manifest.permission.ACCESS_COARSE_LOCATION},
                 MY_PERMISSIONS_REQUEST_ACCESS_COARSE_LOCATION);
 
-        mDeviceList = new ArrayList<>();
-        mSocketHash = new HashMap<>();
+        mServerDeviceList = new ArrayList<>();
+        mClientSocketHash = new HashMap<>();
+        mServerSocketHash = new HashMap<>();
         mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
         mBluetoothAdapter.startDiscovery();
         mReceiver = new BroadcastReceiver() {
@@ -69,7 +71,7 @@ public class MainActivity extends AppCompatActivity implements ConnectCallback {
                 if (BluetoothDevice.ACTION_FOUND.equals(action)) {
                     // Get the BluetoothDevice object from the Intent
                     BluetoothDevice tmpDevice = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
-                    mDeviceList.add(tmpDevice);
+                    mServerDeviceList.add(tmpDevice);
                     // Add the name and address to an array adapter to show in a ListView
                     Log.d("bluetooth","Trouvé "+tmpDevice.getName() + "\n" + tmpDevice.getAddress());
 
@@ -93,9 +95,9 @@ public class MainActivity extends AppCompatActivity implements ConnectCallback {
                 if (BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(action))
                 {
                     Log.d("bluetooth","End Scan");
-                    if (mDeviceList.size() >0 )
-                        for (BluetoothDevice device : mDeviceList) {
-                            ConnectThread ct = new ConnectThread(device, MainActivity.this, uuid);
+                    if (mServerDeviceList.size() >0 )
+                        for (BluetoothDevice device : mServerDeviceList) {
+                            ConnectThread ct = new ConnectThread(device, mHandler, uuid);
                             ct.run();
                         }
                     else {
@@ -126,19 +128,12 @@ public class MainActivity extends AppCompatActivity implements ConnectCallback {
             super.onDestroy();
     }
 
-    @Override
     public void connectionSucceed(BluetoothDevice device, BluetoothSocket socket) {
-        connectedDevices++;
-        mSocketHash.put(device,socket);
-        Log.d("bluetooth","Connection succeed /failed => "+connectedDevices+" "+connectedDevicesFailed+", deviceList size => "+mDeviceList.size());
-        if ((connectedDevicesFailed + connectedDevices) == mDeviceList.size()) {
-            sendDataToServer("Hello Server");
-        }
     }
 
     private void sendDataToServer(String s) {
         Log.d("bluetooth","sendDataToServer "+s);
-        Iterator it = mSocketHash.entrySet().iterator();
+        Iterator it = mServerSocketHash.entrySet().iterator();
         while (it.hasNext()) {
             Map.Entry pair = (Map.Entry)it.next();
             it.remove(); // avoids a ConcurrentModificationException
@@ -151,31 +146,50 @@ public class MainActivity extends AppCompatActivity implements ConnectCallback {
         }
     }
 
-    @Override
     public void connectionFailed() {
-        connectedDevicesFailed++;
-        Log.d("bluetooth","Connection failed "+connectedDevicesFailed);
-        if (connectedDevicesFailed == mDeviceList.size()) {
-            switchToServerMode();
-        } else if ((connectedDevicesFailed + connectedDevices) == mDeviceList.size()) {
-            sendDataToServer("Hello Server");
-        }
     }
 
     private final Handler mHandler = new Handler() {
 
         @Override
         public void handleMessage(Message msg) {
-
-            byte[] buf = (byte[]) msg.obj;
-            String message = new String(buf, 0, msg.arg1);
+            byte[] buf;
+            String message;
+            Pair<BluetoothDevice,BluetoothSocket> tmpPair;
             switch (msg.what) {
                 case MESSAGE_READ:
                     // construct a string from the valid bytes in the buffer
+                    buf = (byte[]) msg.obj;
+                     message = new String(buf, 0, msg.arg1);
                     Log.d("bluetooth ","Message Received : " + message);
                     break;
                 case MESSAGE_WRITE :
+                    buf = (byte[]) msg.obj;
+                    message = new String(buf, 0, msg.arg1);
                     Log.d("bluetooth ","Message Sended : " + message);
+                    break;
+                case MESSAGE_CLIENT_CONNECTED :
+                    tmpPair = (Pair<BluetoothDevice, BluetoothSocket>) msg.obj;
+                    mClientSocketHash.put(tmpPair.first,tmpPair.second);
+                    Log.d("bleutooth","New client connected "+tmpPair.first.getName());
+                    break;
+                case MESSAGE_CONNECTED_TO_SERVER :
+                    connectedDevices++;
+                    tmpPair = (Pair<BluetoothDevice, BluetoothSocket>) msg.obj;
+                    mServerSocketHash.put(tmpPair.first,tmpPair.second);
+                    Log.d("bluetooth","Connection succeed /failed => "+connectedDevices+" "+connectedDevicesFailed+", deviceList size => "+ mServerDeviceList.size());
+                    if ((connectedDevicesFailed + connectedDevices) == mServerDeviceList.size()) {
+                        sendDataToServer("Hello Server");
+                    }
+                    break;
+                case MESSAGE_CONNECTION_TO_SERVER_FAIL :
+                    connectedDevicesFailed++;
+                    Log.d("bluetooth","Connection failed "+connectedDevicesFailed);
+                    if (connectedDevicesFailed == mServerDeviceList.size()) {
+                        switchToServerMode();
+                    } else if ((connectedDevicesFailed + connectedDevices) == mServerDeviceList.size()) {
+                        sendDataToServer("Hello Server");
+                    }
                     break;
             }
         }

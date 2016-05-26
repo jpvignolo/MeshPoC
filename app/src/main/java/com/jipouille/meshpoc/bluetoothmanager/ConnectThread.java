@@ -2,9 +2,12 @@ package com.jipouille.meshpoc.bluetoothmanager;
 
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothSocket;
+import android.os.Handler;
+import android.os.Message;
 import android.util.Log;
+import android.util.Pair;
 
-import com.jipouille.meshpoc.callbacks.ConnectCallback;
+import com.jipouille.meshpoc.MainActivity;
 
 import java.io.IOException;
 import java.util.UUID;
@@ -16,10 +19,10 @@ import java.util.UUID;
 public class ConnectThread extends  Thread {
     private final BluetoothSocket mmSocket;
     private final BluetoothDevice mmDevice;
-    private ConnectCallback callback;
+    private final Handler mHandler;
 
-    public ConnectThread(BluetoothDevice device, ConnectCallback callback, UUID uuid) {
-        this.callback = callback;
+    public ConnectThread(BluetoothDevice device, Handler handler, UUID uuid) {
+        this.mHandler = handler;
         BluetoothSocket tmp = null;
         mmDevice = device;
         try {
@@ -33,7 +36,9 @@ public class ConnectThread extends  Thread {
     public void run() {
         try {
             mmSocket.connect();
-            callback.connectionSucceed(mmDevice, mmSocket);
+            Pair <BluetoothDevice,BluetoothSocket> tmpPair = new Pair<>(mmDevice, mmSocket);
+            Message msg = mHandler.obtainMessage(MainActivity.MESSAGE_CONNECTED_TO_SERVER, tmpPair);
+            msg.sendToTarget();
             Log.d("bluetooth", "Client connecté");
         } catch (IOException e) {
             e.printStackTrace();
@@ -41,7 +46,8 @@ public class ConnectThread extends  Thread {
                 mmSocket.close();
             } catch (IOException closeException) {
             }
-            callback.connectionFailed();
+            Message msg = mHandler.obtainMessage(MainActivity.MESSAGE_CONNECTION_TO_SERVER_FAIL);
+            msg.sendToTarget();
         }
     }
 

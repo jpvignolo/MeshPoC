@@ -1,10 +1,15 @@
 package com.jipouille.meshpoc.bluetoothmanager;
 
 import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothServerSocket;
 import android.bluetooth.BluetoothSocket;
 import android.os.Handler;
+import android.os.Message;
 import android.util.Log;
+import android.util.Pair;
+
+import com.jipouille.meshpoc.MainActivity;
 
 import java.io.IOException;
 import java.util.UUID;
@@ -47,6 +52,10 @@ public class AcceptThread extends Thread {
             if (socket != null) {
                 // Do work to manage the connection (in a separate thread)
                 Log.d("bluetooth", "Server connected!");
+
+                Pair<BluetoothDevice,BluetoothSocket> tmpPair = new Pair<>(socket.getRemoteDevice(), socket);
+                Message msg = mHandler.obtainMessage(MainActivity.MESSAGE_CLIENT_CONNECTED, tmpPair);
+                msg.sendToTarget();
                 try {
                     mmServerSocket.close();
                     ConnectedThread ct = new ConnectedThread(socket, mHandler);
